@@ -1,10 +1,18 @@
 "use client";
 
-import { motion, useScroll, useMotionValueEvent } from "framer-motion";
-import { useRef, useEffect, useState } from "react";
+import { motion } from "framer-motion";
+import { useRef, useEffect, useState, useCallback } from "react";
 
 const TOTAL_FRAMES = 163;
-const SCROLL_HEIGHTS = 3; // complete animation in ~3 viewport scrolls
+
+// Keyframe stops: each scroll snaps to the next target frame
+// Phase 0 → frame 0   (hero content)
+// Phase 1 → frame 65  (building settles)
+// Phase 2 → frame 105 (body expands left)
+// Phase 3 → frame 162 (end of animation)
+// Phase 4 → released, scroll to next section
+const KEYFRAMES = [0, 65, 105, 162];
+const TRANSITION_MS = 1200; // smooth, slow animation between keyframes
 
 const specialtyChips = [
   "Interventional Sciences",
@@ -30,19 +38,14 @@ export function Hero() {
   const [currentFrame, setCurrentFrame] = useState(0);
   const [preloaded, setPreloaded] = useState(false);
 
-  const { scrollYProgress } = useScroll({
-    target: sectionRef,
-    offset: ["start start", "end end"],
-  });
+  const [released, setReleased] = useState(false);
 
-  // Derive content visibility from frame index
-  // Content fades during frames 0–50 (~first scroll), gone by frame 50
-  const contentVisible = currentFrame < 50;
-  const contentFade = currentFrame < 30 ? 1 : currentFrame < 50 ? 1 - (currentFrame - 30) / 20 : 0;
-  const contentShift = currentFrame < 50 ? -(currentFrame / 50) * 30 : -30;
-
-  // Overlay: strong when content shows, moderate during scroll text phases, dark again at end
-  const overlayFade = currentFrame < 30 ? 1 : currentFrame < 55 ? 1 - (currentFrame - 30) / 25 * 0.4 : currentFrame > 130 ? 0.6 + (currentFrame - 130) / 33 * 0.2 : 0.6;
+  const phaseRef = useRef(0);
+  const releasedRef = useRef(false);
+  const isAnimatingRef = useRef(false);
+  const frameRef = useRef(0);
+  const animId = useRef(0);
+  const cooldownRef = useRef(false);
 
   // Preload all frames in background
   useEffect(() => {
@@ -57,24 +60,196 @@ export function Hero() {
     }
   }, []);
 
-  // Update current frame based on scroll
-  useMotionValueEvent(scrollYProgress, "change", (progress) => {
-    const frameIndex = Math.min(
-      Math.floor(progress * TOTAL_FRAMES),
-      TOTAL_FRAMES - 1
-    );
-    setCurrentFrame(frameIndex);
-  });
+  // Smooth frame animation with ease-out cubic
+  const animateToFrame = useCallback((target: number) => {
+    const start = frameRef.current;
+    if (start === target) {
+      isAnimatingRef.current = false;
+      return;
+    }
+
+    const startTime = performance.now();
+    isAnimatingRef.current = true;
+    cancelAnimationFrame(animId.current);
+
+    const tick = (now: number) => {
+      const t = Math.min((now - startTime) / TRANSITION_MS, 1);
+      const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
+      const frame = Math.round(start + (target - start) * eased);
+      frameRef.current = frame;
+      setCurrentFrame(frame);
+
+      if (t < 1) {
+        animId.current = requestAnimationFrame(tick);
+      } else {
+        frameRef.current = target;
+        setCurrentFrame(target);
+        isAnimatingRef.current = false;
+      }
+    };
+
+    animId.current = requestAnimationFrame(tick);
+  }, []);
+
+  // Core logic: advance or retreat one phase
+  const step = useCallback(
+    (direction: 1 | -1): boolean => {
+      const section = sectionRef.current;
+      if (!section) return false;
+
+      const rect = section.getBoundingClientRect();
+
+      // Haven't reached hero yet — let page scroll normally
+      if (rect.top > 5 && direction === 1) return false;
+
+      // Re-engage when scrolling up back to the hero from below
+      if (releasedRef.current && direction === -1) {
+        if (window.scrollY <= 5) {
+          releasedRef.current = false;
+          setReleased(false);
+          phaseRef.current = KEYFRAMES.length - 1;
+          return true;
+        }
+        return false;
+      }
+
+      // Already released, scrolling down — let page scroll
+      if (releasedRef.current) return false;
+
+      // At phase 0 scrolling up — let page scroll naturally
+      if (phaseRef.current <= 0 && direction === -1) return false;
+
+      // During animation or cooldown, block scroll but don't advance
+      if (isAnimatingRef.current || cooldownRef.current) return true;
+
+      if (direction === 1) {
+        if (phaseRef.current < KEYFRAMES.length - 1) {
+          phaseRef.current++;
+          animateToFrame(KEYFRAMES[phaseRef.current]);
+          cooldownRef.current = true;
+          setTimeout(() => {
+            cooldownRef.current = false;
+          }, TRANSITION_MS + 300);
+        } else {
+          // All keyframes done — release to next section
+          releasedRef.current = true;
+          setReleased(true);
+          return false;
+        }
+      } else {
+        if (phaseRef.current > 0) {
+          phaseRef.current--;
+          animateToFrame(KEYFRAMES[phaseRef.current]);
+          cooldownRef.current = true;
+          setTimeout(() => {
+            cooldownRef.current = false;
+          }, TRANSITION_MS + 300);
+        }
+      }
+
+      return true;
+    },
+    [animateToFrame],
+  );
+
+  // Wheel + touch event listeners
+  useEffect(() => {
+    const handleWheel = (e: WheelEvent) => {
+      if (step(e.deltaY > 0 ? 1 : -1)) {
+        e.preventDefault();
+      }
+    };
+
+    let touchStartY = 0;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      touchStartY = e.touches[0].clientY;
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      // Prevent scroll while hero is locked
+      if (
+        !releasedRef.current &&
+        phaseRef.current > 0 &&
+        sectionRef.current
+      ) {
+        const rect = sectionRef.current.getBoundingClientRect();
+        if (rect.top <= 5) e.preventDefault();
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      const deltaY = touchStartY - e.changedTouches[0].clientY;
+      if (Math.abs(deltaY) < 30) return;
+      step(deltaY > 0 ? 1 : -1);
+    };
+
+    window.addEventListener("wheel", handleWheel, { passive: false });
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchmove", handleTouchMove, { passive: false });
+    window.addEventListener("touchend", handleTouchEnd, { passive: true });
+
+    return () => {
+      window.removeEventListener("wheel", handleWheel);
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("touchend", handleTouchEnd);
+      cancelAnimationFrame(animId.current);
+    };
+  }, [step]);
+
+  // ── Derived visual states ──
+
+  // Hero content: visible at frame 0, fades out during 30–50
+  const contentVisible = currentFrame < 50;
+  const contentFade =
+    currentFrame < 30 ? 1 : currentFrame < 50 ? 1 - (currentFrame - 30) / 20 : 0;
+  const contentShift = currentFrame < 50 ? -(currentFrame / 50) * 30 : -30;
+
+  // Dark overlay intensity
+  const overlayFade =
+    currentFrame < 30
+      ? 1
+      : currentFrame < 55
+        ? 1 - ((currentFrame - 30) / 25) * 0.4
+        : currentFrame > 130
+          ? 0.6 + ((currentFrame - 130) / 33) * 0.2
+          : 0.6;
+
+  // Partnership panel: visible around frame 65 (phase 1)
+  // Fades in 48–56, full 56–78, fades out 78–88
+  const partnershipOpacity =
+    currentFrame >= 48 && currentFrame <= 88
+      ? currentFrame < 56
+        ? (currentFrame - 48) / 8
+        : currentFrame > 78
+          ? 1 - (currentFrame - 78) / 10
+          : 1
+      : 0;
+
+  // Clinical panel: visible around frame 105 (phase 2)
+  // Fades in 90–98, full 98–135, fades out 135–148
+  const clinicalOpacity =
+    currentFrame >= 90 && currentFrame <= 148
+      ? currentFrame < 98
+        ? (currentFrame - 90) / 8
+        : currentFrame > 135
+          ? 1 - (currentFrame - 135) / 13
+          : 1
+      : 0;
 
   return (
-    <section
-      ref={sectionRef}
-      id="top"
-      className="relative w-full bg-bg"
-      style={{ height: `${SCROLL_HEIGHTS * 100}vh` }}
-    >
-      {/* Sticky container */}
-      <div className="sticky top-0 h-screen w-full overflow-hidden">
+    <>
+      {/* Spacer: reserves space in the document flow while hero is fixed */}
+      {!released && <div className="h-screen w-full" />}
+
+      <section
+        ref={sectionRef}
+        id="top"
+        className={`w-full bg-bg h-screen ${released ? "relative" : "fixed inset-0 z-50"}`}
+      >
+        {/* Full viewport container */}
+        <div className="h-screen w-full overflow-hidden">
         {/* Layer 0: Frame sequence image */}
         <img
           src={getFrameSrc(currentFrame)}
@@ -83,7 +258,7 @@ export function Hero() {
           draggable={false}
         />
 
-        {/* Layer 1: Dark gradient overlay — fades away when text is gone */}
+        {/* Layer 1: Dark gradient overlay */}
         <div
           className="absolute inset-0 transition-opacity duration-300"
           style={{
@@ -103,11 +278,17 @@ export function Hero() {
           }}
         />
 
-        {/* Layer 2: Grain + grid texture — fades with overlay */}
-        <div className="absolute inset-0 bg-grain transition-opacity duration-300" style={{ opacity: overlayFade * 0.3 }} />
-        <div className="absolute inset-0 bg-grid transition-opacity duration-300" style={{ opacity: overlayFade * 0.2 }} />
+        {/* Layer 2: Grain + grid texture */}
+        <div
+          className="absolute inset-0 bg-grain transition-opacity duration-300"
+          style={{ opacity: overlayFade * 0.3 }}
+        />
+        <div
+          className="absolute inset-0 bg-grid transition-opacity duration-300"
+          style={{ opacity: overlayFade * 0.2 }}
+        />
 
-        {/* Layer 4: Content */}
+        {/* Layer 4: Hero content (phase 0) */}
         <div
           className="relative z-10 max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-10 pt-[120px] sm:pt-[160px] pb-[80px] sm:pb-[120px] h-full flex flex-col transition-all duration-200"
           style={{
@@ -129,7 +310,7 @@ export function Hero() {
             </span>
             <span className="text-[11px] tracking-[0.24em] uppercase text-white/60 font-medium">
               <strong className="font-bold text-white">EIAMS</strong>
-              {" Institute "}&nbsp;·&nbsp;
+              {" Institute "}&nbsp;&middot;&nbsp;
               {" Established for the next generation of specialists"}
             </span>
           </motion.div>
@@ -138,7 +319,9 @@ export function Hero() {
           <h1 className="font-display text-[clamp(44px,7.2vw,108px)] leading-[0.94] tracking-[-0.035em] font-medium max-w-[14ch]">
             <StaggerLine delay={0.55}>Shaping the </StaggerLine>
             <StaggerLine delay={0.7}>
-              <span className="serif-italic text-gradient-teal-light">future</span>{" "}
+              <span className="serif-italic text-gradient-teal-light">
+                future
+              </span>{" "}
               of
             </StaggerLine>
             <StaggerLine delay={0.85}>advanced medical</StaggerLine>
@@ -224,16 +407,10 @@ export function Hero() {
 
         {/* ── Scroll-triggered content panels ── */}
 
-        {/* Phase 2: Partnership reveal (frames 55–100) */}
+        {/* Phase 1: Partnership reveal (centered on frame 65) */}
         <div
-          className="absolute inset-0 z-10 flex items-center justify-center transition-all duration-500 pointer-events-none"
-          style={{
-            opacity: currentFrame >= 55 && currentFrame <= 100
-              ? currentFrame < 62 ? (currentFrame - 55) / 7
-              : currentFrame > 93 ? 1 - (currentFrame - 93) / 7
-              : 1
-              : 0,
-          }}
+          className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none"
+          style={{ opacity: partnershipOpacity }}
         >
           <div className="max-w-[640px] backdrop-blur-xl bg-black/60 rounded-2xl p-8 md:p-12 border border-white/10 shadow-2xl text-center">
             <div className="text-[11px] tracking-[0.3em] uppercase text-teal font-medium mb-8">
@@ -248,10 +425,23 @@ export function Hero() {
                 />
               </div>
               <div className="flex flex-col items-center gap-1">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="text-teal">
-                  <path d="M18 8h1a4 4 0 010 8h-1M6 8H5a4 4 0 000 8h1M8 12h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                <svg
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  className="text-teal"
+                >
+                  <path
+                    d="M18 8h1a4 4 0 010 8h-1M6 8H5a4 4 0 000 8h1M8 12h8"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
                 </svg>
-                <span className="text-[10px] tracking-[0.2em] uppercase text-white/40">×</span>
+                <span className="text-[10px] tracking-[0.2em] uppercase text-white/40">
+                  &times;
+                </span>
               </div>
               <div className="rounded-xl bg-white/90 p-3 md:p-4">
                 <img
@@ -263,25 +453,21 @@ export function Hero() {
             </div>
             <h2 className="font-display text-[clamp(24px,3.5vw,48px)] leading-[1.1] tracking-[-0.03em] font-medium text-white max-w-[24ch] mx-auto">
               EKAM Institute of Advanced Medical Studies{" "}
-              <span className="serif-italic text-gradient-teal-light">&</span>{" "}
+              <span className="serif-italic text-gradient-teal-light">&amp;</span>{" "}
               Sakra World Hospital
             </h2>
             <p className="mt-5 max-w-[48ch] mx-auto text-[15px] md:text-[16px] leading-[1.6] text-white/70">
-              World-class clinical infrastructure meets advanced medical education — training the next generation inside a working multi-specialty hospital.
+              World-class clinical infrastructure meets advanced medical
+              education — training the next generation inside a working
+              multi-specialty hospital.
             </p>
           </div>
         </div>
 
-        {/* Phase 3: What the partnership delivers (frames 110–150) */}
+        {/* Phase 2: Clinical training partner (centered on frame 105) */}
         <div
-          className="absolute inset-0 z-10 flex items-end pb-[10%] justify-start transition-all duration-500 pointer-events-none"
-          style={{
-            opacity: currentFrame >= 110 && currentFrame <= 150
-              ? currentFrame < 117 ? (currentFrame - 110) / 7
-              : currentFrame > 143 ? 1 - (currentFrame - 143) / 7
-              : 1
-              : 0,
-          }}
+          className="absolute inset-0 z-10 flex items-end pb-[10%] justify-start pointer-events-none"
+          style={{ opacity: clinicalOpacity }}
         >
           <div className="max-w-[1440px] w-full mx-auto px-6 lg:px-10">
             <div className="max-w-[560px] backdrop-blur-xl bg-black/60 rounded-2xl p-8 md:p-10 border border-white/10 shadow-2xl">
@@ -320,10 +506,10 @@ export function Hero() {
         {/* Bottom fade */}
         <div className="absolute bottom-0 inset-x-0 h-[120px] bg-gradient-to-t from-bg to-transparent pointer-events-none z-20" />
 
-        {/* Scroll cue */}
+        {/* Scroll cue — only visible at phase 0 */}
         <div
-          className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 text-white/50 z-30 transition-opacity duration-300"
-          style={{ opacity: currentFrame < 10 ? 1 : 0 }}
+          className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 text-white/50 z-30 transition-opacity duration-500"
+          style={{ opacity: currentFrame < 5 ? 1 : 0 }}
         >
           <span className="text-[10px] tracking-[0.3em] uppercase">
             Scroll
@@ -341,6 +527,7 @@ export function Hero() {
         </div>
       </div>
     </section>
+    </>
   );
 }
 
