@@ -246,7 +246,7 @@ export function Hero() {
       <section
         ref={sectionRef}
         id="top"
-        className={`w-full bg-bg h-screen ${released ? "relative" : "fixed inset-0 z-50"}`}
+        className={`w-full bg-bg h-screen ${released ? "relative" : "fixed inset-0 z-40"}`}
       >
         {/* Full viewport container */}
         <div className="h-screen w-full overflow-hidden">
