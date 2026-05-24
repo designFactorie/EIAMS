@@ -23,13 +23,17 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: ekam-web/package-lock.json
 
       - run: npm ci
+        working-directory: ekam-web
+
       - run: npm run build
+        working-directory: ekam-web
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: out
+          path: ekam-web/out
 
   deploy:
     environment:
