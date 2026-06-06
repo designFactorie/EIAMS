@@ -430,7 +430,7 @@ export default function AboutPage() {
                 },
                 {
                   name: "Tamil Selvan",
-                  role: "Program Director",
+                  role: "Dean and Program Director",
                   initials: "TS",
                   photo: "/ProgramDirector.jpeg",
                   description:
