@@ -20,9 +20,50 @@ const instrumentSerif = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
-  title: "EKAM Institute of Advanced Medical Studies",
+  metadataBase: new URL("https://ekaminstituteofadvancemedicalstudies.com"),
+  title: {
+    default: "EKAM Institute of Advanced Medical Studies",
+    template: "%s | EKAM Institute of Advanced Medical Studies",
+  },
   description:
     "Where Medicine Meets Advanced Technology. Shaping the future of advanced medical education through fellowships in interventional sciences, robotic surgery, clinical innovation, and undergraduate programmes in nursing, physiotherapy, and allied health sciences.",
+  keywords: [
+    "EKAM",
+    "EKAM Institute",
+    "EKAM Institute of Advanced Medical Studies",
+    "medical fellowship",
+    "interventional sciences",
+    "robotic surgery",
+    "clinical innovation",
+    "nursing programmes",
+    "physiotherapy",
+    "allied health sciences",
+    "advanced medical education",
+    "medical studies India",
+  ],
+  openGraph: {
+    title: "EKAM Institute of Advanced Medical Studies",
+    description:
+      "Where Medicine Meets Advanced Technology. Shaping the future of advanced medical education through fellowships in interventional sciences, robotic surgery, and clinical innovation.",
+    url: "https://ekaminstituteofadvancemedicalstudies.com",
+    siteName: "EKAM Institute of Advanced Medical Studies",
+    locale: "en_IN",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "EKAM Institute of Advanced Medical Studies",
+    description:
+      "Where Medicine Meets Advanced Technology. Shaping the future of advanced medical education.",
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+    },
+  },
 };
 
 export default function RootLayout({
