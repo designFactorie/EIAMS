@@ -5,6 +5,7 @@ import { motion, useScroll, useTransform } from "framer-motion";
 const links = [
   { label: "About Us", href: "/about" },
   { label: "Our Programs", href: "/programs" },
+  { label: "Partners", href: "/partners" },
   { label: "Admissions", href: "/admissions" },
   { label: "Contact Us", href: "/contact" },
 ];

@@ -27,6 +27,7 @@ export function FooterLight() {
               { label: "Home", href: "/" },
               { label: "About", href: "/about" },
               { label: "Programs", href: "/programs" },
+              { label: "Partners", href: "/partners" },
               { label: "Contact", href: "/contact" },
             ].map((link) => (
               <Link
